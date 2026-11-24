@@ -1,191 +1,266 @@
 #!/usr/bin/env python3
-"""Build entry.png: a newspaper front page summing up Tuesday 24 November 2026.
+"""Draw the 24 November 2026 front page: THE WORLD IN ONE DAY.
 
-Local build tool only (needs Pillow): it draws the image once, and main.ts ships
-the finished PNG. Run:
-    python3 gen_image.py            # writes entry.png next to this file
-All facts were checked against Reuters, Yeni Safak, Times of India and One Turn
-reporting on 24 November 2026; see SOURCES in the README.
+A single-file Pillow build tool. It renders a 1024x1024 newspaper front page
+from the story data below and writes it to entry.png next to this script.
+Run:  python3 gen_image.py
 """
-import textwrap
+
 from PIL import Image, ImageDraw, ImageFont
 
-W = H = 1024
-PAPER = (246, 241, 231)
-INK = (16, 16, 16)
-NAVY = (15, 35, 64)
-GOLD = (217, 164, 65)
-GREY = (90, 90, 90)
+PAGE = 1024
+OUT = "entry.png"
+
+# --- palette ----------------------------------------------------------------
+CREAM = (246, 241, 226)
+NAVY = (30, 42, 68)
+GOLD = (233, 162, 59)
+PAPER = (255, 255, 255)
+CARD_LINE = (217, 210, 191)
+DECK_INK = (76, 70, 58)
+MUTED = (110, 103, 90)
 WHITE = (255, 255, 255)
 
-SERIF = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
-SERIF_IT = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
-SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-SANS_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+FONT_DIR = "/usr/share/fonts/truetype/dejavu/"
+
+# --- page copy ---------------------------------------------------------------
+MASTHEAD = "THE WORLD IN ONE DAY"
+DATE_LINE = "TUESDAY \u00b7 24 NOVEMBER 2026"
+KICKER = "Six stories that defined the day"
+TICKER = "Colombia car bomb \u00b7 Honda recalls 810,000 cars \u00b7 Zanzibar hotel fire"
+FOOTER = "Sources: Reuters \u00b7 Yeni Safak \u00b7 Times of India \u00b7 One Turn \u00b7 24 Nov 2026"
+
+# tag, accent colour, icon kind, headline lines, deck
+STORIES = [
+    (
+        "TECH",
+        (194, 105, 26),
+        "chip",
+        ["HUANG\u2019S HERO", "RETURN"],
+        "A day after the board reinstated him and shares jumped 31%, "
+        "Trump hails his own intervention as the chip boss returns to HQ.",
+    ),
+    (
+        "UKRAINE",
+        (168, 58, 48),
+        "drone",
+        ["RUSSIA HITS", "ZAPORIZHZHIA"],
+        "Overnight strike kills two and wounds 22, including two children; "
+        "Moscow also claims hits on drone sites in Sumy.",
+    ),
+    (
+        "DIPLOMACY",
+        (43, 76, 155),
+        "globe",
+        ["MERZ: EUROPE READY", "TO TALK"],
+        "At a Berlin presser with NATO chief Rutte, Merz says adviser "
+        "talks could resume in Abu Dhabi.",
+    ),
+    (
+        "MIDDLE EAST",
+        (30, 122, 108),
+        "grenade",
+        ["ISRAEL STRIKE KILLS", "HAMAS CHIEF"],
+        "An airstrike kills Naeem Abu Nahel, director of Hamas internal "
+        "security, in western Gaza City; at least three more die near Khan Younis.",
+    ),
+    (
+        "ASIA",
+        (106, 63, 160),
+        "jet",
+        ["KOREAS ON EDGE AS", "JETS SCRAMBLE"],
+        "Seoul scrambles jets as Russian warplanes enter its defence zone; "
+        "a suspected North Korean jet breaches airspace near Ulleung.",
+    ),
+    (
+        "USA",
+        (122, 92, 30),
+        "starburst",
+        ["TRUMP HALTS IOWA", "DETONATION"],
+        "The president stops the army blowing up toxic explosives at an Iowa "
+        "plant \u2014 but a court clears the blast to go ahead anyway.",
+    ),
+]
 
 
-def font(path, size):
-    return ImageFont.truetype(path, size)
+# --- font helpers ------------------------------------------------------------
+def font(name, size):
+    return ImageFont.truetype(FONT_DIR + name, size)
 
 
-def wrap(draw, text, fnt, width):
-    """Greedy word wrap to a pixel width; returns list of lines."""
-    lines, cur = [], ""
+def shrink_to_fit(draw, text, name, size, limit):
+    """Largest size at or below `size` whose rendered width fits `limit`."""
+    while size > 10 and draw.textlength(text, font=font(name, size)) > limit:
+        size -= 1
+    return font(name, size)
+
+
+def wrap(draw, text, fnt, limit):
+    """Greedy word wrap; returns a list of lines no wider than `limit`."""
+    lines, current = [], ""
     for word in text.split():
-        trial = f"{cur} {word}".strip()
-        if draw.textlength(trial, font=fnt) <= width:
-            cur = trial
+        trial = word if not current else current + " " + word
+        if draw.textlength(trial, font=fnt) <= limit:
+            current = trial
         else:
-            if cur:
-                lines.append(cur)
-            cur = word
-    if cur:
-        lines.append(cur)
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
     return lines
 
 
-def draw_icon(draw, kind, box, color):
-    """Small flat icon drawn with primitives. box = (x0, y0, x1, y1)."""
-    x0, y0, x1, y1 = box
-    cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
-    if kind == "tech":  # chip
-        draw.rectangle([x0 + 12, y0 + 12, x1 - 12, y1 - 12], fill=color)
-        draw.rectangle([x0 + 22, y0 + 22, x1 - 22, y1 - 22], fill=PAPER)
-        for i in range(3):
-            t = x0 + 20 + i * 12
-            draw.line([t, y0 + 4, t, y0 + 12], fill=color, width=3)
-            draw.line([t, y1 - 12, t, y1 - 4], fill=color, width=3)
-            ty = y0 + 20 + i * 12
-            draw.line([x0 + 4, ty, x0 + 12, ty], fill=color, width=3)
-            draw.line([x1 - 12, ty, x1 - 4, ty], fill=color, width=3)
-    elif kind == "ukraine":  # quadcopter drone
-        draw.rectangle([cx - 10, cy - 8, cx + 10, cy + 8], fill=color)
-        for sx in (-1, 1):
-            for sy in (-1, 1):
-                px, py = cx + sx * 20, cy + sy * 16
-                draw.line([cx, cy, px, py], fill=color, width=3)
-                draw.ellipse([px - 9, py - 4, px + 9, py + 4], outline=color, width=3)
-    elif kind == "diplomacy":  # globe
-        draw.ellipse([x0 + 4, y0 + 4, x1 - 4, y1 - 4], outline=color, width=4)
-        draw.ellipse([cx - 12, y0 + 4, cx + 12, y1 - 4], outline=color, width=3)
-        draw.line([x0 + 4, cy, x1 - 4, cy], fill=color, width=3)
-        draw.arc([x0 + 4, y0 + 14, x1 - 4, y1 - 14], 200, 340, fill=color, width=3)
-    elif kind == "bomb":  # round bomb with fuse
-        draw.ellipse([cx - 18, cy - 6, cx + 18, cy + 28], fill=color)
-        draw.line([cx + 8, cy - 6, cx + 20, cy - 20], fill=color, width=4)
-        for dx, dy in [(24, -26), (16, -28), (28, -18)]:
-            draw.line([cx + dx - 3, cy + dy - 3, cx + dx + 3, cy + dy + 3], fill=color, width=3)
-            draw.line([cx + dx - 3, cy + dy + 3, cx + dx + 3, cy + dy - 3], fill=color, width=3)
-    elif kind == "jets":  # fighter jet, nose up-right
-        draw.polygon([(x0 + 8, y1 - 8), (x0 + 30, cy - 6), (x1 - 6, y0 + 10),
-                      (x1 - 14, cy + 2), (x0 + 34, y1 - 16), (x0 + 22, y1 - 6)],
-                     fill=color)
-        draw.polygon([(cx - 2, cy + 6), (cx + 16, y1 - 4), (cx + 2, cy + 14)], fill=color)
-    elif kind == "blast":  # starburst
+def centred(draw, text, fnt, y, colour, cx=PAGE // 2):
+    w = draw.textlength(text, font=fnt)
+    draw.text((cx - w / 2, y), text, font=fnt, fill=colour)
+
+
+# --- icons (simple line-art glyphs, drawn in the card accent colour) ---------
+def draw_icon(draw, kind, cx, cy, s, colour):
+    h = s // 2
+    if kind == "chip":
+        draw.rectangle([cx - h * 0.55, cy - h * 0.55, cx + h * 0.55, cy + h * 0.55],
+                       outline=colour, width=4)
+        draw.rectangle([cx - h * 0.22, cy - h * 0.22, cx + h * 0.22, cy + h * 0.22],
+                       fill=colour)
+        for k in (-1, 0, 1):
+            off = k * h * 0.42
+            draw.line([cx + off, cy - h * 0.85, cx + off, cy - h * 0.55], fill=colour, width=3)
+            draw.line([cx + off, cy + h * 0.55, cx + off, cy + h * 0.85], fill=colour, width=3)
+            draw.line([cx - h * 0.85, cy + off, cx - h * 0.55, cy + off], fill=colour, width=3)
+            draw.line([cx + h * 0.55, cy + off, cx + h * 0.85, cy + off], fill=colour, width=3)
+    elif kind == "drone":
+        draw.rectangle([cx - h * 0.28, cy - h * 0.14, cx + h * 0.28, cy + h * 0.14],
+                       fill=colour)
+        for sx, sy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
+            ex, ey = cx + sx * h * 0.8, cy + sy * h * 0.8
+            draw.line([cx, cy, ex, ey], fill=colour, width=3)
+            draw.ellipse([ex - h * 0.3, ey - h * 0.3, ex + h * 0.3, ey + h * 0.3],
+                         outline=colour, width=3)
+    elif kind == "globe":
+        draw.ellipse([cx - h * 0.8, cy - h * 0.8, cx + h * 0.8, cy + h * 0.8],
+                     outline=colour, width=4)
+        draw.arc([cx - h * 0.35, cy - h * 0.8, cx + h * 0.35, cy + h * 0.8],
+                 start=270, end=90, fill=colour, width=3)
+        draw.arc([cx - h * 0.35, cy - h * 0.8, cx + h * 0.35, cy + h * 0.8],
+                 start=90, end=270, fill=colour, width=3)
+        draw.line([cx - h * 0.8, cy, cx + h * 0.8, cy], fill=colour, width=3)
+    elif kind == "grenade":
+        draw.ellipse([cx - h * 0.55, cy - h * 0.15, cx + h * 0.55, cy + h * 0.75],
+                     fill=colour)
+        draw.rectangle([cx - h * 0.18, cy - h * 0.55, cx + h * 0.18, cy - h * 0.12],
+                       fill=colour)
+        draw.line([cx + h * 0.18, cy - h * 0.55, cx + h * 0.62, cy - h * 0.85],
+                  fill=colour, width=3)
+        draw.line([cx + h * 0.62, cy - h * 0.85, cx + h * 0.85, cy - h * 0.6],
+                  fill=colour, width=3)
+        draw.line([cx + h * 0.85, cy - h * 0.6, cx + h * 0.62, cy - h * 0.4],
+                  fill=colour, width=3)
+    elif kind == "jet":
+        draw.polygon(
+            [
+                (cx + h * 0.85, cy - h * 0.75),
+                (cx - h * 0.75, cy + h * 0.35),
+                (cx - h * 0.25, cy + h * 0.15),
+                (cx - h * 0.55, cy + h * 0.75),
+                (cx + h * 0.05, cy + h * 0.35),
+                (cx + h * 0.35, cy + h * 0.55),
+            ],
+            fill=colour,
+        )
+    elif kind == "starburst":
+        # spiky 8-point star: alternating outer and inner vertices
         import math
-        pts = []
-        for i in range(16):
-            ang = math.pi * i / 8
-            r = 30 if i % 2 == 0 else 13
-            pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
-        draw.polygon(pts, fill=color)
-        draw.ellipse([cx - 8, cy - 8, cx + 8, cy + 8], fill=PAPER)
+
+        points = []
+        for k in range(16):
+            angle = -math.pi / 2 + k * math.pi / 8
+            radius = h * 0.85 if k % 2 == 0 else h * 0.38
+            points.append((cx + radius * math.cos(angle),
+                           cy + radius * math.sin(angle)))
+        draw.polygon(points, fill=colour)
+        draw.ellipse([cx - h * 0.28, cy - h * 0.28, cx + h * 0.28, cy + h * 0.28],
+                     fill=CREAM)
 
 
-CARDS = [
-    ("TECH", (178, 91, 9), "tech",
-     "HUANG\u2019S HERO RETURN",
-     "A day after the board reinstated him and shares jumped 31%, Trump hails "
-     "his own intervention as the chip boss returns to HQ."),
-    ("UKRAINE", (166, 58, 46), "ukraine",
-     "RUSSIA HITS ZAPORIZHZHIA",
-     "Overnight strike kills two and wounds 22, including two children; Moscow "
-     "also claims hits on drone sites in Sumy."),
-    ("DIPLOMACY", (36, 86, 166), "diplomacy",
-     "MERZ: EUROPE READY TO TALK",
-     "At a Berlin presser with NATO chief Rutte, Merz says adviser talks could "
-     "resume in Abu Dhabi."),
-    ("MIDDLE EAST", (16, 110, 92), "bomb",
-     "ISRAEL STRIKE KILLS HAMAS CHIEF",
-     "An airstrike kills Naeem Abu Nahel, director of Hamas internal security, "
-     "in western Gaza City; at least three more die near Khan Younis."),
-    ("ASIA", (90, 60, 140), "jets",
-     "KOREAS ON EDGE AS JETS SCRAMBLE",
-     "Seoul scrambles jets as Russian warplanes enter its defence zone; a "
-     "suspected North Korean jet breaches airspace near Ulleung."),
-    ("USA", (110, 82, 40), "blast",
-     "TRUMP HALTS IOWA DETONATION",
-     "The president stops the army blowing up toxic explosives at an Iowa plant "
-     "\u2014 but a court clears the blast to go ahead anyway."),
-]
+# --- card --------------------------------------------------------------------
+def draw_card(draw, box, story):
+    tag, accent, icon, headline, deck = story
+    x0, y0, x1, y1 = box
+    draw.rectangle([x0, y0, x1, y1], fill=PAPER, outline=CARD_LINE, width=1)
+    draw.rectangle([x0, y0, x1, y0 + 7], fill=accent)
 
-TICKER = ("ALSO TODAY:  Colombia car bomb  \u00b7  Honda recalls 810,000 cars  "
-          "\u00b7  Zanzibar hotel fire")
+    tag_font = font("DejaVuSans-Bold.ttf", 19)
+    tag_w = draw.textlength(tag, font=tag_font)
+    chip_x, chip_y = x0 + 16, y0 + 17
+    draw.rectangle([chip_x, chip_y, chip_x + tag_w + 20, chip_y + 27], fill=accent)
+    draw.text((chip_x + 10, chip_y + 3), tag, font=tag_font, fill=WHITE)
+
+    draw_icon(draw, icon, x1 - 46, y0 + 40, 52, accent)
+
+    head_font = font("DejaVuSerif-Bold.ttf", 33)
+    hy = y0 + 56
+    for line in headline:
+        draw.text((x0 + 16, hy), line, font=head_font, fill=NAVY)
+        hy += 38
+
+    deck_font = font("DejaVuSans.ttf", 19)
+    dy = y0 + 142
+    for line in wrap(draw, deck, deck_font, (x1 - x0) - 32)[:3]:
+        draw.text((x0 + 16, dy), line, font=deck_font, fill=DECK_INK)
+        dy += 24
 
 
-def main():
-    img = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(img)
-    # frame
-    d.rectangle([10, 10, W - 11, H - 11], outline=NAVY, width=3)
+# --- page --------------------------------------------------------------------
+def build():
+    img = Image.new("RGB", (PAGE, PAGE), CREAM)
+    draw = ImageDraw.Draw(img)
+
+    draw.rectangle([10, 10, PAGE - 10, PAGE - 10], outline=NAVY, width=3)
+
     # masthead
-    d.rectangle([24, 24, W - 24, 168], fill=NAVY)
-    f_title = font(SERIF, 62)
-    f_date = font(SANS_B, 34)
-    d.text((W // 2, 52), "THE WORLD IN ONE DAY", font=f_title, fill=WHITE, anchor="ma")
-    d.text((W // 2, 128), "TUESDAY  \u00b7  24 NOVEMBER 2026", font=f_date, fill=GOLD, anchor="ma")
-    # sub-deck
-    f_sub = font(SERIF_IT, 23)
-    d.text((W // 2, 182), "Six stories that defined the day", font=f_sub, fill=GREY, anchor="ma")
-    d.line([W // 2 - 120, 214, W // 2 + 120, 214], fill=GOLD, width=3)
+    draw.rectangle([22, 22, PAGE - 22, 166], fill=NAVY)
+    title_font = shrink_to_fit(draw, MASTHEAD, "DejaVuSerif-Bold.ttf", 62, 940)
+    centred(draw, MASTHEAD, title_font, 44, WHITE)
+    date_font = font("DejaVuSans-Bold.ttf", 32)
+    centred(draw, DATE_LINE, date_font, 112, GOLD)
 
-    # grid of cards: 2 cols x 3 rows
-    gx, gy, gw, gh, gap = 24, 226, 476, 222, 12
-    f_kick = font(SANS_B, 17)
-    f_head = font(SANS_B, 28)
-    f_deck = font(SANS, 19)
-    for i, (kicker, color, icon, head, deck) in enumerate(CARDS):
-        cx = gx + (i % 2) * (gw + gap)
-        cy = gy + (i // 2) * (gh + gap)
-        d.rectangle([cx, cy, cx + gw, cy + gh], fill=WHITE, outline=(200, 192, 172), width=2)
-        d.rectangle([cx, cy, cx + gw, cy + 6], fill=color)
-        # kicker tag
-        kw = d.textlength(kicker, font=f_kick) + 20
-        d.rectangle([cx + 14, cy + 18, cx + 14 + kw, cy + 44], fill=color)
-        d.text((cx + 24, cy + 31), kicker, font=f_kick, fill=WHITE, anchor="lm")
-        # icon top-right
-        draw_icon(d, icon, (cx + gw - 78, cy + 16, cx + gw - 14, cy + 80), color)
-        # headline (max 2 lines; keep clear of the icon zone at top-right)
-        lines = wrap(d, head, f_head, gw - 32 - 88)
-        y = cy + 56
-        for ln in lines[:2]:
-            d.text((cx + 16, y), ln, font=f_head, fill=INK)
-            y += 35
-        # deck (max 3 lines)
-        dlines = wrap(d, deck, f_deck, gw - 32)
-        y = cy + 56 + 35 * min(len(lines), 2) + 6
-        for ln in dlines[:3]:
-            d.text((cx + 16, y), ln, font=f_deck, fill=(60, 60, 60))
-            y += 25
+    # kicker
+    kicker_font = font("DejaVuSerif.ttf", 26)
+    centred(draw, KICKER, kicker_font, 180, MUTED)
+    draw.rectangle([PAGE // 2 - 60, 216, PAGE // 2 + 60, 219], fill=GOLD)
 
-    # ticker strip (shrink the font until the line fits the strip)
-    ty = gy + 3 * gh + 2 * gap + 12  # 928
-    d.rectangle([24, ty, W - 24, ty + 44], fill=NAVY)
-    tick_size = 18
-    while tick_size > 12:
-        f_tick = font(SANS_B, tick_size)
-        if d.textlength(TICKER, font=f_tick) <= 940:
-            break
-        tick_size -= 1
-    d.text((W // 2, ty + 22), TICKER, font=f_tick, fill=WHITE, anchor="mm")
+    # story grid: 2 columns x 3 rows
+    left, right = 24, PAGE - 24
+    gap = 16
+    col_w = (right - left - gap) // 2
+    row_h, row_gap, top = 224, 12, 230
+    for idx, story in enumerate(STORIES):
+        col, row = idx % 2, idx // 2
+        x0 = left + col * (col_w + gap)
+        y0 = top + row * (row_h + row_gap)
+        draw_card(draw, (x0, y0, x0 + col_w, y0 + row_h), story)
+
+    # ticker
+    draw.rectangle([left, 936, right, 980], fill=NAVY)
+    tick_font = shrink_to_fit(draw, "ALSO TODAY:  " + TICKER,
+                              "DejaVuSans.ttf", 21, 930)
+    bold_font = font("DejaVuSans-Bold.ttf", tick_font.size)
+    label = "ALSO TODAY:  "
+    lw = draw.textlength(label, font=bold_font)
+    total = lw + draw.textlength(TICKER, font=tick_font)
+    tx = (PAGE - total) // 2
+    draw.text((tx, 948), label, font=bold_font, fill=WHITE)
+    draw.text((tx + lw, 948), TICKER, font=tick_font, fill=WHITE)
+
     # footer
-    f_foot = font(SANS, 14)
-    d.text((W // 2, H - 38), "Sources: Reuters \u00b7 Yeni Safak \u00b7 Times of India \u00b7 One Turn \u00b7 24 Nov 2026",
-           font=f_foot, fill=GREY, anchor="ma")
+    foot_font = font("DejaVuSans.ttf", 16)
+    centred(draw, FOOTER, foot_font, 990, MUTED)
 
-    img.save("entry.png", optimize=True)
-    print("wrote entry.png", img.size)
+    img.save(OUT)
+    print(f"wrote {OUT} {img.size[0]}x{img.size[1]}")
 
 
 if __name__ == "__main__":
-    main()
+    build()
